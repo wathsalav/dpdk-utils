@@ -48,8 +48,11 @@ def _setup_driver(driver):
         vfmod.write('%s\n'%driver)
     _exec('modprobe %s'%driver)
 
-def _bind_devs(dl, driver):
-    cmd = "ExecStart=/usr/bin/python3 /usr/local/bin/dpdk/usertools/dpdk-devbind.py --bind=%s %s"%(driver, dl)
+def _bind_devs(dl, driver, use_local=True):
+    if use_local:
+        cmd = "ExecStart=/usr/bin/python3 /usr/local/sbin/dpdk-devbind --bind=%s %s"%(driver, dl)
+    else:
+        cmd = "ExecStart=/usr/bin/python3 /usr/sbin/dpdk-devbind --bind=%s %s"%(driver, dl)
     systemd_conf = systemd_tmpl%(cmd)
     with open(_dpdk_unit, 'w') as sf:
         sf.write(systemd_conf)
@@ -66,25 +69,30 @@ def _get_dpdk_src():
         _exec('git clone %s %s'%(_dpdk_git, src))
 
 def _copy_usertools():
-    src = '/tmp/dpdk/usertools'
-    dst = '/usr/local/bin/dpdk'
-    if not os.path.exists(dst):
-        os.makedirs(dst)
-    else:
-        shutil.rmtree(dst)
-    shutil.copytree(src, '%s/usertools'%dst)
+    src = '/tmp/dpdk/usertools/dpdk-devbind.py'
+    dst = '/usr/local/sbin/dpdk-devbind'
+    if os.path.exists(dst):
+        os.remove(dst)
+    shutil.copy(src, dst)
+
+def _dnf_install_dpdk():
+    _exec('dnf -y install dpdk dpdk-devel dpdk-tools')
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--nics', nargs='*', default=[], help='Space separated list of NICs to be bound to dpdk')
     parser.add_argument('-d', '--driver', type=str, default='vfio-pci', help='Binding dpdk driver')
+    parser.add_argument('-s', '--from-src', action='store_true', help='Use source from dpdk git')
     args = parser.parse_args()
 
-    _get_dpdk_src()
-    _copy_usertools()
+    if args.from_src:
+        _get_dpdk_src()
+        _copy_usertools()
+    else:
+        _dnf_install_dpdk()
     _setup_grub()
     _setup_driver(args.driver)
-    _bind_devs(' '.join(args.nics), args.driver)
+    _bind_devs(' '.join(args.nics), args.driver, use_local=args.from_src)
     if _reboot:
         _exec('reboot')
 
